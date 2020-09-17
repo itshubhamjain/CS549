@@ -20,8 +20,10 @@ public interface IServer extends Remote {
 
 	public String[] dir() throws RemoteException;
 
-	public void port(int clientPort) throws RemoteException;
+	public void port(InetSocketAddress clientPort) throws RemoteException;
 
 	public int pasv() throws IOException, RemoteException;
 
+
 }
+ 

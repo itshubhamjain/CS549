@@ -3,6 +3,7 @@ package edu.stevens.cs549.ftpserver;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -47,6 +48,9 @@ public class Server extends UnicastRemoteObject
     static final int MAX_PATH_LEN = 1024;
     private Stack<String> cwd = new Stack<String>();
     
+	static void msg(String m) {
+		System.out.print(m);
+	}
     /*
      *********************************************************************************************
      * Data connection.
@@ -74,13 +78,13 @@ public class Server extends UnicastRemoteObject
      */
     private InetSocketAddress clientSocket = null;
     
-    private void makeActive (int clientPort) {
-//    	clientSocket = s;
-    	try {
-			clientSocket = InetSocketAddress.createUnresolved(getClientHost(), clientPort);
-		} catch (ServerNotActiveException e) {
-			throw new IllegalStateException ("Make active", e);
-		}
+    private void makeActive (InetSocketAddress s) {
+    	clientSocket = s;
+//    	try {
+//			clientSocket = InetSocketAddress.createUnresolved(getClientHost(), clientPort);
+//		} catch (ServerNotActiveException e) {
+//			throw new IllegalStateException ("Make active", e);
+//		}
     	mode = Mode.ACTIVE;
     }
     
@@ -118,6 +122,27 @@ public class Server extends UnicastRemoteObject
     		/*
     		 * TODO: Process a client request to transfer a file.
     		 */
+    		try {
+    			Socket xfer = dataChan.accept();
+    			OutputStream out = xfer.getOutputStream();
+    			byte[] buffer = new byte[1024];
+    			int rc = file.read(buffer, 0, 1024);
+    			
+    			while (rc > 0) {
+    				out.write(buffer, 0, rc);
+    				out.flush();
+    				rc = file.read(buffer, 0, 1024);
+    			}
+    			
+    			out.close();
+    			file.close();
+    			xfer.close();
+    			
+    		}catch (IOException e) {
+				msg("Exception: " + e);
+				e.printStackTrace();
+    		}
+    		
     	}
     }
     
@@ -130,13 +155,16 @@ public class Server extends UnicastRemoteObject
         	/*
         	 * TODO: connect to client socket to transfer file.
         	 */
-        	InputStream in = new FileInputStream(path()+file);
+        	
+        	FileInputStream in = new FileInputStream(path()+file);
         	OutputStream out = xfer.getOutputStream();
         	byte[] buffer = new byte[1024];
         	int rc = in.read(buffer,0,1024);
+        	
         	while(rc > 0) {
-        		out.write(buffer,0, rc < 1024 ? rc : 1024);
-        		rc = in.read(buffer,0,1024);
+        		out.write(buffer,0, rc );
+        		out.flush();
+        		rc = in.read(buffer,0,1024);        		
         	}
         	xfer.close();
         	in.close();
@@ -150,10 +178,87 @@ public class Server extends UnicastRemoteObject
         }
     }
     
+    
+    
+    private class PutThread implements Runnable {
+		/*
+		 * This client-side thread runs when the server is active mode and a
+		 * file download is initiated. This thread listens for a connection
+		 * request from the server. The client-side server socket (...)
+		 * should have been created when the port command put the server in
+		 * active mode.
+		 */
+		private ServerSocket dataChan = null;
+		private FileOutputStream file = null;
+		
+		public PutThread(ServerSocket s, FileOutputStream f) {
+			dataChan = s;
+			file = f;
+		}
+
+		public void run() {
+			try {
+				/*
+				 * TODO: Complete this thread.
+				 */
+				Socket xfer = dataChan.accept();
+				InputStream in = xfer.getInputStream();
+				byte[] buffer = new byte[1024];
+				int rc = in.read(buffer, 0, 1024);
+				
+				while (rc > 0) {
+					file.write(buffer, 0, rc);
+					file.flush();
+					rc = in.read(buffer, 0, 1024);
+				}
+				
+				in.close();
+				file.close();
+				xfer.close();
+				/*
+				 * End TODO
+				 */
+			} catch (IOException e) {
+				msg("Exception: " + e);
+				e.printStackTrace();
+			}
+		}
+
+	}
+    
     public void put (String file) throws IOException, FileNotFoundException, RemoteException {
     	/*
     	 * TODO: Finish put (both ACTIVE and PASSIVE).
     	 */
+        if (!valid(file)) {
+            throw new IOException("Bad file name: " + file);
+        } else if (mode == Mode.ACTIVE) {
+
+        	Socket xfer = new Socket (clientSocket.getAddress(), clientSocket.getPort());
+        	/*
+        	 * TODO: connect to client socket to transfer file.
+        	 */
+        	
+        	FileOutputStream f = new FileOutputStream(path()+file);
+        	InputStream in = xfer.getInputStream();
+        	byte[] buffer = new byte[1024];
+        	int rc = in.read(buffer,0,1024);
+        	
+        	while(rc > 0) {
+        		f.write(buffer,0, rc );
+        		f.flush();
+        		rc = in.read(buffer,0,1024);        		
+        	}
+        	xfer.close();
+        	in.close();
+        	f.close();
+        	/*
+			 * End TODO.
+			 */
+        } else if (mode == Mode.PASSIVE) {
+        	FileOutputStream f = new FileOutputStream(path()+file);
+            new Thread (new PutThread(dataChan, f)).start();
+        }
     	
     }
     
@@ -200,7 +305,7 @@ public class Server extends UnicastRemoteObject
     	return pathPrefix+pwd();
     }
     
-    public void port (int clientPort) {
+    public void port (InetSocketAddress clientPort) {
     	makeActive(clientPort);
     }
     

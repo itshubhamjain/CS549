@@ -271,15 +271,15 @@ public class Client {
 
 		private ServerSocket dataChan = null;
 
-		private int makeActive() throws IOException {
-			InetAddress myAddr = InetAddress.getByName(clientIp);
+		private InetSocketAddress makeActive() throws IOException {
+			InetAddress myAddr = Client.host;
 			dataChan = new ServerSocket(0, BACKLOG_LENGTH, myAddr);
 			mode = Mode.ACTIVE;
 			/* 
 			 * Note: this only works (for the server) if the client is not behind a NAT.
 			 */
-//			return (InetSocketAddress) (dataChan.getLocalSocketAddress());
-			return dataChan.getLocalPort();
+			return (InetSocketAddress) (dataChan.getLocalSocketAddress());
+//			return dataChan.getLocalPort();
 		}
 
 		/*
@@ -306,10 +306,16 @@ public class Client {
 			 */
 			private ServerSocket dataChan = null;
 			private FileOutputStream file = null;
+			private FileInputStream fileIn = null;
 
 			public GetThread(ServerSocket s, FileOutputStream f) {
 				dataChan = s;
 				file = f;
+			}
+			
+			public GetThread(ServerSocket s, FileInputStream f) {
+				dataChan = s;
+				fileIn = f;
 			}
 
 			public void run() {
@@ -318,7 +324,19 @@ public class Client {
 					 * TODO: Complete this thread.
 					 */
 					Socket xfer = dataChan.accept();
-
+					InputStream in = xfer.getInputStream();
+					byte[] buffer = new byte[1024];
+					int rc = in.read(buffer, 0, 1024);
+					
+					while (rc > 0) {
+						file.write(buffer, 0, rc);
+						file.flush();
+						rc = in.read(buffer, 0, 1024);
+					}
+					
+					in.close();
+					file.close();
+					xfer.close();
 					/*
 					 * End TODO
 					 */
@@ -327,7 +345,9 @@ public class Client {
 					e.printStackTrace();
 				}
 			}
+	
 		}
+	
 
 		public void get(String[] inputs) {
 			if (inputs.length == 2) {
@@ -343,7 +363,7 @@ public class Client {
 			        	byte[] buffer = new byte[1024];
 			        	int rc = in.read(buffer,0,1024);
 			        	while(rc > 0) {
-			        		f.write(buffer,0, rc < 1024 ? rc : 1024);
+			        		f.write(buffer,0, rc);
 			        		rc = in.read(buffer,0,1024);
 			        	}
 			        	xfer.close();
@@ -361,10 +381,87 @@ public class Client {
 				}
 			}
 		}
+		
+		
+		
+		
+		
+		private class PutThread implements Runnable {
+			/*
+			 * This client-side thread runs when the server is active mode and a
+			 * file download is initiated. This thread listens for a connection
+			 * request from the server. The client-side server socket (...)
+			 * should have been created when the port command put the server in
+			 * active mode.
+			 */
+			private ServerSocket dataChan = null;
+			private FileInputStream file = null;
+			
+			public PutThread(ServerSocket s, FileInputStream f) {
+				dataChan = s;
+				file = f;
+			}
+
+			public void run() {
+				try {
+					/*
+					 * TODO: Complete this thread.
+					 */
+
+					Socket xfer = dataChan.accept();
+					OutputStream out = xfer.getOutputStream();
+					byte[] buffer = new byte[1024];
+					int rc = file.read(buffer, 0, 1024);
+					
+					while (rc > 0) {
+						out.write(buffer, 0, rc);
+						out.flush();
+						rc = file.read(buffer, 0, 1024);
+					}
+					
+					out.close();
+					file.close();
+					xfer.close();
+					/*
+					 * End TODO
+					 */
+				} catch (IOException e) {
+					msg("Exception: " + e);
+					e.printStackTrace();
+				}
+			}
+
+		}
+		
 
 		public void put(String[] inputs) {
 			if (inputs.length == 2) {
 				try {
+					if(mode==Mode.PASSIVE) {
+						svr.put(inputs[1]);
+						FileInputStream f = new FileInputStream(inputs[1]);
+						Socket xfer = new Socket(serverAddress, serverSocket.getPort());
+						/*
+						 * TODO: connect to server socket to transfer file.
+						 */
+						OutputStream out = xfer.getOutputStream();
+			        	byte[] buffer = new byte[1024];
+			        	int rc = f.read(buffer,0,1024);
+			        	while(rc > 0) {
+			        		out.write(buffer,0, rc);
+			        		rc = f.read(buffer,0,1024);
+			        	}
+			        	xfer.close();
+			        	out.close();
+			        	f.close();
+						
+					}else if(mode ==Mode.ACTIVE) {
+						FileInputStream f = new FileInputStream(inputs[1]);
+						new Thread(new PutThread(dataChan, f)).start();
+			        	
+						svr.put(inputs[1]);
+						
+					}
 					/*
 					 * TODO: Finish put (both ACTIVE and PASSIVE mode supported).
 					 */
@@ -420,8 +517,8 @@ public class Client {
 		public void port(String[] inputs) {
 			if (inputs.length == 1) {
 				try {
-//					InetSocketAddress s = makeActive();
-					int s = makeActive();
+					InetSocketAddress s = makeActive();
+//					int s = makeActive();
 					svr.port(s);
 					msgln("PORT: Server in active mode.");
 				} catch (Exception e) {
